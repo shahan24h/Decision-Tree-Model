@@ -1,0 +1,148 @@
+
+---
+```{r}
+library(tidyverse)
+library(dplyr)
+library(foreign)
+library(rpart)
+library(rpart.plot)
+library(haven)
+library(tidymodels)
+library(rattle)
+library(caret)
+library(naniar)
+```
+
+#Step 1: Import the data
+```{r}
+churn <-read.csv("Churn.csv", header= TRUE, sep = ",", stringsAsFactors = T) 
+```
+
+#Step 2: Clean the dataset
+```{r}
+churn <- churn %>%
+  select(Churn, gender, SeniorCitizen, Partner, Dependents, tenure, MonthlyCharges)
+na.omit
+str(churn)
+```
+#Found that 'seniorCitizen' is integer. Let's code this into factor
+```{r}
+churn1<-churn %>%
+  mutate(SeniorCitizen = recode_factor(SeniorCitizen,
+                                       '1'="Yes",
+                                       '0'="No"))
+
+churn1 <- churn1 %>%
+  mutate(TenureCategory = cut(tenure,
+                              breaks = c(0, 12, 36, Inf),
+                              right = TRUE)) %>%
+mutate(TenureCategory= as.factor(TenureCategory))
+
+churn1 <- churn1 %>%
+  select(-tenure)
+
+
+str(churn1)
+
+```
+#Step 3: Create train/test set
+
+#Using the “tidymodels” package to split the data set into training (70%) and testing set (30%); then build a decision tree for the target “Churn” by including all feature variables and setting the cp value to 0.01. 
+
+```{r}
+set.seed(123)
+data_split <- initial_split(churn1, prop=0.7, strata = Churn)
+
+traindf<- training(data_split)
+testdf<- testing(data_split)
+
+mytree <- rpart(Churn~., data = traindf, method="class", minsplit=2, minbucket=1, cp=0.01)
+
+
+rpart.plot(mytree, type=1, extra = 101)
+fancyRpartPlot(mytree)
+
+```
+There are 4 feature variables used in this tree, tenure and Monthly charges. There are 7 leaf nodes
+
+
+#Next Step:
+According to the tree grown in step 1, if “you” have been with the company for over 17 months, what is the probability that you “churn?” 
+
+```{r}
+rpart.plot(mytree, type=1, extra="auto")
+```
+We found that probability of yes "churning"is 0.17%
+
+
+#Now changing our parameter, and Set cp = 0.005 to grow another tree.
+
+Let's find out that, if “I” have been with the company for 12 months and is paying $70 monthly charge, what is the probability that “I” “churn?”
+
+
+```{r}
+mytree2 <- rpart(Churn~gender+SeniorCitizen+Partner+Dependents+TenureCategory+MonthlyCharges,
+              data=traindf,
+              method="class",
+              minsplit=2,
+              minbucket=1,
+              cp=0.005)
+
+rpart.plot(mytree2, type=1, extra="auto")
+fancyRpartPlot(mytree2) 
+```
+
+
+#3.The probability of you "churning"is 0.32%
+
+Obtain the Confusion Matrices for the two tree models with cp=0.01 and cp=0.005 on the training data only. Based on the differences of the indexes of “accuracy”, “sensitivity,” and “specificity” in the two models, which one is better?
+
+
+```{r}
+train.pred<-predict(mytree,traindf, type="class")
+
+confusionMatrix(train.pred, traindf$Churn)
+
+train.pred2<-predict(mytree2, traindf, type="class")
+
+confusionMatrix(train.pred2, traindf$Churn)
+```
+
+#4.Two models are same in terms of accuracy, sensitivity, and specifically.
+
+Obtain the Confusion Matrices for the two tree models with cp=0.01 and cp=0.005 on the testing data. 
+
+Also, let's compare the results with what we obtain in step last step, 
+
+is there evediance of model over-fitting? 
+
+Which tree(s) should you keep for decision making in the future? (Provide evidence and make your own arguments). 
+
+
+```{r}
+test.pred<-predict(mytree,testdf,type="class")
+
+confusionMatrix(test.pred, testdf$Churn)
+
+test.pred2<-predict(mytree2,testdf,type="class")
+
+confusionMatrix(test.pred2, testdf$Churn)
+```
+#5.overfitting observed in both trees, as they are identical to each other.
+
+Lets see that the variable “SeniorCitizen” leads to information gain as a feature (variable) in a tree model. 
+
+```{r}
+
+tab1 <-table(churn$SeniorCitizen, churn$Churn)
+tab1
+
+giniN<-1-((4508/(4508+1393))^2+(1393/(4508+1393))^2)
+
+giniY<-1-((666/(666+476))^2+(476/(666+476))^2)
+
+weighted_gini<-((4508+1393)/7043)*(0.3606731)+((666+476)/7043)*0.4861597
+
+```
+#Indeed, the feature SeniorCitizen contributes to information gain, as it has a weighted Gini index of 0.38, which is less than 0.5, indicating a notable reduction in impurity.
+
